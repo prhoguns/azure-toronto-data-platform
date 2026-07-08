@@ -1,0 +1,11 @@
+{
+  "name": "ls_adls_lake",
+  "properties": {
+    "type": "AzureBlobFS",
+    "typeProperties": {
+      "url": "https://@{linkedService().storageAccountName}.dfs.core.windows.net"
+    },
+    "parameters": { "storageAccountName": { "type": "string" } },
+    "annotations": ["Uses the Data Factory managed identity; RBAC granted in infra/main.bicep"]
+  }
+}

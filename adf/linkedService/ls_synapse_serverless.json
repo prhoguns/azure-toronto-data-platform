@@ -1,0 +1,11 @@
+{
+  "name": "ls_synapse_serverless",
+  "properties": {
+    "type": "AzureSqlDatabase",
+    "typeProperties": {
+      "connectionString": "Server=tcp:@{linkedService().serverlessEndpoint},1433;Database=toronto;Encrypt=True;Connection Timeout=30;",
+      "authenticationType": "SystemAssignedManagedIdentity"
+    },
+    "parameters": { "serverlessEndpoint": { "type": "string" } }
+  }
+}

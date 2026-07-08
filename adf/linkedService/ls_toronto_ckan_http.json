@@ -1,0 +1,11 @@
+{
+  "name": "ls_toronto_ckan_http",
+  "properties": {
+    "type": "HttpServer",
+    "typeProperties": {
+      "url": "https://ckan0.cf.opendata.inter.prod-toronto.ca/",
+      "enableServerCertificateValidation": true,
+      "authenticationType": "Anonymous"
+    }
+  }
+}
