@@ -1,0 +1,97 @@
+{
+  "name": "pl_toronto_open_data",
+  "properties": {
+    "description": "Daily: copy three open.toronto.ca files to bronze, run Databricks bronze->silver->gold, refresh Synapse views.",
+    "parameters": { "runDate": { "type": "string", "defaultValue": "@formatDateTime(utcNow(), 'yyyy-MM-dd')" } },
+    "variables": {
+      "crimeUrl": { "type": "String", "defaultValue": "dataset/6909ea60-ef0e-465f-b5d0-43106b6b9130/resource/8084057c-b2da-486c-b517-38f4e314b820/download/major-crime-indicators.csv" },
+      "hoodsUrl": { "type": "String", "defaultValue": "dataset/fc443770-ef0a-4025-9c2c-2cb558bfab00/resource/7f7dc9c5-42bb-446e-ad79-dd4dd792c9db/download/neighbourhoods-4326.csv" },
+      "profilesUrl": { "type": "String", "defaultValue": "dataset/6e19a90f-971c-46b3-852c-0c48c436d1fc/resource/19d4a806-7385-4889-acf2-256f1e079060/download/nbhd_2021_census_profile_full_158model.xlsx" }
+    },
+    "activities": [
+      {
+        "name": "CopyCrimeToBronze",
+        "type": "Copy",
+        "policy": { "timeout": "0.01:00:00", "retry": 2, "retryIntervalInSeconds": 60 },
+        "inputs": [{ "referenceName": "ds_ckan_csv", "type": "DatasetReference", "parameters": { "relativeUrl": "@variables('crimeUrl')" } }],
+        "outputs": [{ "referenceName": "ds_bronze_csv", "type": "DatasetReference", "parameters": { "table": "major_crime_indicators", "runDate": "@pipeline().parameters.runDate", "fileName": "major_crime_indicators.csv" } }],
+        "typeProperties": {
+          "source": { "type": "DelimitedTextSource", "storeSettings": { "type": "HttpReadSettings", "requestMethod": "GET" } },
+          "sink": { "type": "DelimitedTextSink", "storeSettings": { "type": "AzureBlobFSWriteSettings" } },
+          "enableStaging": false
+        }
+      },
+      {
+        "name": "CopyNeighbourhoodsToBronze",
+        "type": "Copy",
+        "policy": { "timeout": "0.00:10:00", "retry": 2, "retryIntervalInSeconds": 60 },
+        "inputs": [{ "referenceName": "ds_ckan_csv", "type": "DatasetReference", "parameters": { "relativeUrl": "@variables('hoodsUrl')" } }],
+        "outputs": [{ "referenceName": "ds_bronze_csv", "type": "DatasetReference", "parameters": { "table": "neighbourhoods", "runDate": "@pipeline().parameters.runDate", "fileName": "neighbourhoods.csv" } }],
+        "typeProperties": {
+          "source": { "type": "DelimitedTextSource", "storeSettings": { "type": "HttpReadSettings", "requestMethod": "GET" } },
+          "sink": { "type": "DelimitedTextSink", "storeSettings": { "type": "AzureBlobFSWriteSettings" } }
+        }
+      },
+      {
+        "name": "CopyProfilesToBronze",
+        "description": "Excel -> CSV. The sheet is metrics-as-rows x neighbourhoods-as-columns; a Data Flow (df_unpivot_profiles) turns it into long format.",
+        "type": "Copy",
+        "policy": { "timeout": "0.00:10:00", "retry": 2, "retryIntervalInSeconds": 60 },
+        "inputs": [{ "referenceName": "ds_ckan_xlsx", "type": "DatasetReference", "parameters": { "relativeUrl": "@variables('profilesUrl')" } }],
+        "outputs": [{ "referenceName": "ds_bronze_csv", "type": "DatasetReference", "parameters": { "table": "neighbourhood_profiles_wide", "runDate": "@pipeline().parameters.runDate", "fileName": "profiles_wide.csv" } }],
+        "typeProperties": {
+          "source": { "type": "ExcelSource", "storeSettings": { "type": "HttpReadSettings", "requestMethod": "GET" } },
+          "sink": { "type": "DelimitedTextSink", "storeSettings": { "type": "AzureBlobFSWriteSettings" } }
+        }
+      },
+      {
+        "name": "UnpivotProfiles",
+        "type": "ExecuteDataFlow",
+        "dependsOn": [{ "activity": "CopyProfilesToBronze", "dependencyConditions": ["Succeeded"] }],
+        "policy": { "timeout": "0.00:30:00", "retry": 1 },
+        "typeProperties": {
+          "dataflow": { "referenceName": "df_unpivot_profiles", "type": "DataFlowReference", "parameters": { "runDate": "@pipeline().parameters.runDate" } },
+          "compute": { "coreCount": 8, "computeType": "General" }
+        }
+      },
+      {
+        "name": "SilverNeighbourhoods",
+        "type": "DatabricksNotebook",
+        "dependsOn": [
+          { "activity": "CopyNeighbourhoodsToBronze", "dependencyConditions": ["Succeeded"] },
+          { "activity": "UnpivotProfiles", "dependencyConditions": ["Succeeded"] }
+        ],
+        "policy": { "timeout": "0.01:00:00", "retry": 1 },
+        "linkedServiceName": { "referenceName": "ls_databricks", "type": "LinkedServiceReference" },
+        "typeProperties": { "notebookPath": "/Repos/toronto/databricks/notebooks/01b_bronze_to_silver_neighbourhoods", "baseParameters": { "run_date": "@pipeline().parameters.runDate" } }
+      },
+      {
+        "name": "SilverCrime",
+        "type": "DatabricksNotebook",
+        "dependsOn": [{ "activity": "CopyCrimeToBronze", "dependencyConditions": ["Succeeded"] }],
+        "policy": { "timeout": "0.01:00:00", "retry": 1 },
+        "linkedServiceName": { "referenceName": "ls_databricks", "type": "LinkedServiceReference" },
+        "typeProperties": { "notebookPath": "/Repos/toronto/databricks/notebooks/01_bronze_to_silver", "baseParameters": { "run_date": "@pipeline().parameters.runDate" } }
+      },
+      {
+        "name": "Gold",
+        "type": "DatabricksNotebook",
+        "dependsOn": [
+          { "activity": "SilverCrime", "dependencyConditions": ["Succeeded"] },
+          { "activity": "SilverNeighbourhoods", "dependencyConditions": ["Succeeded"] }
+        ],
+        "policy": { "timeout": "0.01:00:00", "retry": 1 },
+        "linkedServiceName": { "referenceName": "ls_databricks", "type": "LinkedServiceReference" },
+        "typeProperties": { "notebookPath": "/Repos/toronto/databricks/notebooks/02_silver_to_gold" }
+      },
+      {
+        "name": "RefreshSynapseViews",
+        "type": "Script",
+        "dependsOn": [{ "activity": "Gold", "dependencyConditions": ["Succeeded"] }],
+        "linkedServiceName": { "referenceName": "ls_synapse_serverless", "type": "LinkedServiceReference" },
+        "typeProperties": { "scripts": [{ "type": "NonQuery", "text": "EXEC gold.refresh_views" }] }
+      }
+    ],
+    "annotations": ["toronto", "open-data"]
+  }
+}
