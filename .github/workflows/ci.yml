@@ -1,0 +1,29 @@
+name: CI
+on: [push, pull_request]
+jobs:
+  bicep:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Validate Bicep
+        run: |
+          az bicep install
+          az bicep build -f infra/main.bicep --stdout > /dev/null
+          az bicep lint -f infra/main.bicep
+      - name: Validate ADF JSON
+        run: for f in adf/*/*.json adf/*.json; do jq empty "$f"; done
+  notebooks:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: {python-version: "3.11"}
+      - run: pip install pyspark==3.4.0 openpyxl
+      - name: Fetch the real source files
+        run: |
+          mkdir raw
+          curl -sL -o raw/major_crime_indicators.csv "https://ckan0.cf.opendata.inter.prod-toronto.ca/dataset/6909ea60-ef0e-465f-b5d0-43106b6b9130/resource/8084057c-b2da-486c-b517-38f4e314b820/download/major-crime-indicators.csv"
+          curl -sL -o raw/neighbourhoods.csv "https://ckan0.cf.opendata.inter.prod-toronto.ca/dataset/fc443770-ef0a-4025-9c2c-2cb558bfab00/resource/7f7dc9c5-42bb-446e-ad79-dd4dd792c9db/download/neighbourhoods-4326.csv"
+          python tests/make_profiles_long.py raw/neighbourhood_profiles.csv
+      - name: Run notebooks on local Spark
+        run: python tests/run_local.py raw/major_crime_indicators.csv raw/neighbourhoods.csv raw/neighbourhood_profiles.csv
