@@ -1,5 +1,7 @@
 # Azure Toronto Data Platform
 
+_Portfolio sprint timeline: January–September 2026. Reported results retain their actual run dates._
+
 The Azure-native version of [toronto-open-data-pipeline](https://github.com/prhoguns/toronto-open-data-pipeline):
 **Data Factory → ADLS Gen2 → Databricks (PySpark, Delta, medallion) → Synapse serverless SQL → Power BI**,
 deployed with Bicep. Same source data, same gold star schema, same numbers.
