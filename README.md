@@ -64,3 +64,7 @@ synapse/     sql/01_setup · 02_views · 03_sample_queries
 tests/       run_local.py (Spark-in-Docker verification)
 docs/        architecture.md
 ```
+
+## Acknowledgments
+
+AI tools assisted with documentation and repository organization.
