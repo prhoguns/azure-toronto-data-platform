@@ -1,12 +1,11 @@
 #!/usr/bin/env bash
-# One-shot deployment. Needs: az CLI logged in, AZ_ADMIN_OBJECT_ID and SYNAPSE_SQL_PASSWORD exported.
+# One-shot deployment. Needs: az CLI logged in. AZ_ADMIN_OBJECT_ID defaults to the signed-in user.
 set -euo pipefail
 RG="${RG:-rg-toronto-data}"
 LOCATION="${LOCATION:-canadacentral}"
 
 : "${AZ_ADMIN_OBJECT_ID:=$(az ad signed-in-user show --query id -o tsv)}"
-: "${SYNAPSE_SQL_PASSWORD:?export SYNAPSE_SQL_PASSWORD first}"
-export AZ_ADMIN_OBJECT_ID SYNAPSE_SQL_PASSWORD
+export AZ_ADMIN_OBJECT_ID
 
 az group create -n "$RG" -l "$LOCATION" -o none
 az deployment group create -g "$RG" -f "$(dirname "$0")/main.bicep" -p "$(dirname "$0")/main.bicepparam" \

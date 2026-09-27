@@ -22,12 +22,16 @@ flowchart LR
 ## Cost profile
 
 Everything is pay-per-use or free tier: ADLS LRS (cents), ADF (a few pipeline runs a day), Databricks
-job cluster of one `Standard_DS3_v2` for ~5 minutes/day, Synapse **serverless** (no dedicated pool, billed per TB scanned;
+job cluster of one `Standard_DS3_v2` for ~5 minutes/day on the Premium tier (required for Unity Catalog), Synapse **serverless** (no dedicated pool, billed per TB scanned;
 the gold tables are ~40 MB). Expect well under CAD $10/month. Tear down with `az group delete -n rg-toronto-data`.
 
 ## Security
 
-- No keys anywhere: Data Factory and Synapse use system-assigned managed identities, granted
-  Storage Blob Data Contributor on the lake in Bicep.
-- Storage: HNS on, public blob access off, TLS 1.2 minimum.
-- Key Vault with RBAC authorization for the Synapse SQL admin password.
+- No keys anywhere: Data Factory, Synapse and the Databricks access connector (Unity Catalog's
+  storage credential) use system-assigned managed identities, granted Storage Blob Data
+  Contributor on the lake. Storage account keys and local users are disabled, so nothing else can
+  get in.
+- Synapse accepts Entra ID logins only; there is no SQL admin password.
+- Storage: HNS on, public blob access off, TLS 1.2 minimum, infrastructure encryption.
+- Key Vault with RBAC authorization and purge protection.
+- The same controls are defined in both `infra/main.bicep` and `infra/terraform/`.

@@ -1,6 +1,8 @@
 // Azure data platform for the Toronto open-data pipeline.
-// Deploys: ADLS Gen2 storage (bronze/silver/gold containers), Data Factory, Databricks workspace,
-// Synapse workspace with a serverless SQL pool, Key Vault. Everything is sized for the free tier / pay-per-query.
+// Deploys: ADLS Gen2 storage (bronze/silver/gold containers), Data Factory, Databricks workspace with a
+// Unity Catalog access connector, Synapse workspace with a serverless SQL pool, Key Vault. Every service
+// reaches the lake with its managed identity; storage keys and SQL passwords are disabled.
+// infra/terraform/ deploys the same platform with Terraform.
 //
 //   az group create -n rg-toronto-data -l canadacentral
 //   az deployment group create -g rg-toronto-data -f infra/main.bicep -p infra/main.bicepparam
@@ -18,12 +20,9 @@ param location string = resourceGroup().location
 @description('Object ID of the user who will administer Key Vault and Synapse (az ad signed-in-user show --query id -o tsv).')
 param adminObjectId string
 
-@description('SQL admin login for the Synapse workspace.')
-param synapseSqlAdmin string = 'sqladmin'
-
-@secure()
-@description('SQL admin password for the Synapse workspace.')
-param synapseSqlPassword string
+@description('premium is required for Unity Catalog, which the notebooks use to reach the lake.')
+@allowed(['standard', 'premium'])
+param databricksSku string = 'premium'
 
 var suffix = uniqueString(resourceGroup().id)
 var storageName = toLower('${prefix}${suffix}')
@@ -40,6 +39,14 @@ resource storage 'Microsoft.Storage/storageAccounts@2023-05-01' = {
     minimumTlsVersion: 'TLS1_2'
     allowBlobPublicAccess: false
     supportsHttpsTrafficOnly: true
+    allowSharedKeyAccess: false      // Entra ID + RBAC only; no account keys exist to leak
+    defaultToOAuthAuthentication: true
+    isLocalUserEnabled: false
+    encryption: {
+      requireInfrastructureEncryption: true
+      keySource: 'Microsoft.Storage'
+      services: { blob: { enabled: true }, file: { enabled: true } }
+    }
   }
 }
 
@@ -62,6 +69,8 @@ resource keyVault 'Microsoft.KeyVault/vaults@2023-07-01' = {
     sku: { family: 'A', name: 'standard' }
     enableRbacAuthorization: true
     enableSoftDelete: true
+    softDeleteRetentionInDays: 90
+    enablePurgeProtection: true
   }
 }
 
@@ -77,10 +86,18 @@ resource dataFactory 'Microsoft.DataFactory/factories@2018-06-01' = {
 resource databricks 'Microsoft.Databricks/workspaces@2024-05-01' = {
   name: 'dbw-${prefix}-${suffix}'
   location: location
-  sku: { name: 'standard' }
+  sku: { name: databricksSku }
   properties: {
     managedResourceGroupId: subscriptionResourceId('Microsoft.Resources/resourceGroups', 'rg-${prefix}-dbw-managed-${suffix}')
   }
+}
+
+// Unity Catalog storage credential: the identity Databricks uses to read and write the lake.
+resource accessConnector 'Microsoft.Databricks/accessConnectors@2024-05-01' = {
+  name: 'dbac-${prefix}-${suffix}'
+  location: location
+  identity: { type: 'SystemAssigned' }
+  properties: {}
 }
 
 // ---------------- Synapse (serverless SQL only; no dedicated pool = no idle cost) ----------------
@@ -93,10 +110,20 @@ resource synapse 'Microsoft.Synapse/workspaces@2021-06-01' = {
       accountUrl: storage.properties.primaryEndpoints.dfs
       filesystem: 'synapse'
     }
-    sqlAdministratorLogin: synapseSqlAdmin
-    sqlAdministratorLoginPassword: synapseSqlPassword
+    azureADOnlyAuthentication: true  // Entra ID logins only; no SQL password exists
   }
   dependsOn: [lakeContainers]
+}
+
+resource synapseEntraAdmin 'Microsoft.Synapse/workspaces/administrators@2021-06-01' = {
+  parent: synapse
+  name: 'activeDirectory'
+  properties: {
+    administratorType: 'ActiveDirectory'
+    login: 'platform-admin'
+    sid: adminObjectId
+    tenantId: subscription().tenantId
+  }
 }
 
 resource synapseFirewallAzure 'Microsoft.Synapse/workspaces/firewallRules@2021-06-01' = {
@@ -108,6 +135,7 @@ resource synapseFirewallAzure 'Microsoft.Synapse/workspaces/firewallRules@2021-0
 // ---------------- RBAC: ADF and Synapse read/write the lake; admin owns Key Vault ----------------
 var storageBlobDataContributor = subscriptionResourceId('Microsoft.Authorization/roleDefinitions', 'ba92f5b4-2d11-453d-a403-e96b0029c9fe')
 var keyVaultAdministrator = subscriptionResourceId('Microsoft.Authorization/roleDefinitions', '00482a5a-887f-4fb3-b363-3b7fe8e74483')
+var storageBlobDataOwner = subscriptionResourceId('Microsoft.Authorization/roleDefinitions', 'b7e6dc6d-f1e8-4753-8033-0f276bb0955b')
 
 resource adfLakeAccess 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
   name: guid(storage.id, dataFactory.id, storageBlobDataContributor)
@@ -129,6 +157,27 @@ resource synapseLakeAccess 'Microsoft.Authorization/roleAssignments@2022-04-01' 
   }
 }
 
+resource databricksLakeAccess 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
+  name: guid(storage.id, accessConnector.id, storageBlobDataContributor)
+  scope: storage
+  properties: {
+    roleDefinitionId: storageBlobDataContributor
+    principalId: accessConnector.identity.principalId
+    principalType: 'ServicePrincipal'
+  }
+}
+
+// With shared keys disabled, the administrator reaches the data with their own identity.
+resource adminLake 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
+  name: guid(storage.id, adminObjectId, storageBlobDataOwner)
+  scope: storage
+  properties: {
+    roleDefinitionId: storageBlobDataOwner
+    principalId: adminObjectId
+    principalType: 'User'
+  }
+}
+
 resource adminKeyVault 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
   name: guid(keyVault.id, adminObjectId, keyVaultAdministrator)
   scope: keyVault
@@ -144,3 +193,4 @@ output dataFactoryName string = dataFactory.name
 output databricksWorkspaceUrl string = databricks.properties.workspaceUrl
 output synapseServerlessEndpoint string = synapse.properties.connectivityEndpoints.sql
 output keyVaultName string = keyVault.name
+output databricksAccessConnectorId string = accessConnector.id

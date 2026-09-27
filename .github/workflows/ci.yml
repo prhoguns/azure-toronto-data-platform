@@ -12,6 +12,25 @@ jobs:
           az bicep lint -f infra/main.bicep
       - name: Validate ADF JSON
         run: for f in adf/*/*.json adf/*.json; do jq empty "$f"; done
+  terraform:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: hashicorp/setup-terraform@v4
+        with:
+          terraform_version: 1.16.4
+          terraform_wrapper: false
+      - name: Format, validate and test (mocked Azure provider)
+        working-directory: infra/terraform
+        run: |
+          terraform fmt -check -recursive
+          terraform init -backend=false -input=false
+          terraform validate
+          terraform test
+      - name: Checkov
+        run: |
+          docker run --rm -v "$PWD/infra/terraform:/src" -w /src bridgecrew/checkov:3.3.19 \
+            -d . --framework terraform --skip-path .terraform --compact --quiet
   notebooks:
     runs-on: ubuntu-latest
     steps:
