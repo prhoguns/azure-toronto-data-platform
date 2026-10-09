@@ -1,10 +1,13 @@
 name: CI
 on: [push, pull_request]
+permissions:
+  contents: read
+
 jobs:
   bicep:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Validate Bicep
         run: |
           az bicep install
@@ -15,8 +18,8 @@ jobs:
   terraform:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: hashicorp/setup-terraform@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: hashicorp/setup-terraform@dfe3c3f87815947d99a8997f908cb6525fc44e9e # v4.0.1
         with:
           terraform_version: 1.16.4
           terraform_wrapper: false
@@ -29,15 +32,15 @@ jobs:
           terraform test
       - name: Checkov
         run: |
-          docker run --rm -v "$PWD/infra/terraform:/src" -w /src bridgecrew/checkov:3.3.19 \
+          docker run --rm -v "$PWD/infra/terraform:/src" -w /src bridgecrew/checkov:3.3.26 \
             -d . --framework terraform --skip-path .terraform --compact --quiet
   notebooks:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
-        with: {python-version: "3.11"}
-      - run: pip install pyspark==3.4.0 openpyxl
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with: {python-version: "3.12"}  # the Databricks Runtime 17 Python
+      - run: pip install pyspark==4.0.4 openpyxl==3.1.5
       - name: Fetch the real source files
         run: |
           mkdir raw

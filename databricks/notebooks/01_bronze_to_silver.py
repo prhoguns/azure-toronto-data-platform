@@ -32,18 +32,18 @@ silver = (
         F.trim("EVENT_UNIQUE_ID").alias("event_id"),
         F.to_date("REPORT_DATE").alias("report_date"),
         F.to_date("OCC_DATE").alias("occurrence_date"),
-        F.col("OCC_YEAR").cast(T.IntegerType()).alias("occurrence_year"),
-        F.col("OCC_HOUR").cast(T.IntegerType()).alias("occurrence_hour"),
+        F.col("OCC_YEAR").try_cast(T.IntegerType()).alias("occurrence_year"),
+        F.col("OCC_HOUR").try_cast(T.IntegerType()).alias("occurrence_hour"),
         F.trim("OCC_DOW").alias("occurrence_dow"),
         F.trim("DIVISION").alias("police_division"),
         F.trim("LOCATION_TYPE").alias("location_type"),
         F.trim("PREMISES_TYPE").alias("premises_type"),
         F.trim("OFFENCE").alias("offence"),
         F.trim("MCI_CATEGORY").alias("mci_category"),
-        F.when(F.col("HOOD_158").isin("NSA", ""), None).otherwise(F.col("HOOD_158").cast(T.IntegerType())).alias("neighbourhood_id"),
+        F.when(F.col("HOOD_158").isin("NSA", ""), None).otherwise(F.col("HOOD_158").try_cast(T.IntegerType())).alias("neighbourhood_id"),
         F.trim("NEIGHBOURHOOD_158").alias("neighbourhood_name_raw"),
-        F.col("LONG_WGS84").cast(T.DoubleType()).alias("longitude"),
-        F.col("LAT_WGS84").cast(T.DoubleType()).alias("latitude"),
+        F.col("LONG_WGS84").try_cast(T.DoubleType()).alias("longitude"),
+        F.col("LAT_WGS84").try_cast(T.DoubleType()).alias("latitude"),
     )
     .dropDuplicates(["source_row_id"])
     .withColumn("_ingested_at", F.current_timestamp())

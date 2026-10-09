@@ -42,6 +42,24 @@ mock_provider "azurerm" {
   }
 }
 
+mock_provider "fabric" {
+  mock_data "fabric_capacity" {
+    defaults = { id = "33333333-0000-0000-0000-000000000001" }
+  }
+  mock_resource "fabric_workspace" {
+    defaults = {
+      id       = "33333333-0000-0000-0000-000000000002"
+      identity = { type = "SystemAssigned", service_principal_id = "33333333-0000-0000-0000-000000000003" }
+    }
+  }
+  mock_resource "fabric_lakehouse" {
+    defaults = { id = "33333333-0000-0000-0000-000000000004" }
+  }
+  mock_resource "fabric_connection" {
+    defaults = { id = "33333333-0000-0000-0000-000000000005" }
+  }
+}
+
 run "lake_is_adls_gen2_without_keys" {
   assert {
     condition     = azurerm_storage_account.lake.is_hns_enabled
@@ -130,4 +148,52 @@ run "rejects_invalid_prefix" {
     prefix = "Tor-Data"
   }
   expect_failures = [var.prefix]
+}
+
+run "fabric_is_off_by_default" {
+  assert {
+    condition     = length(azurerm_fabric_capacity.this) == 0 && length(fabric_workspace.this) == 0 && length(fabric_shortcut.gold) == 0
+    error_message = "The Fabric layer is opt-in; a default deploy must not create a capacity that bills."
+  }
+}
+
+run "fabric_serves_gold_through_shortcuts" {
+  variables {
+    enable_fabric    = true
+    fabric_admin_upn = "admin@example.com"
+  }
+  assert {
+    condition     = azurerm_fabric_capacity.this[0].sku[0].name == "F2" && azurerm_fabric_capacity.this[0].administration_members == toset(["admin@example.com"])
+    error_message = "Smallest capacity by default, administered by the named user."
+  }
+  assert {
+    condition     = fabric_workspace.this[0].capacity_id == "33333333-0000-0000-0000-000000000001" && fabric_workspace.this[0].identity.type == "SystemAssigned"
+    error_message = "The workspace runs on the new capacity and has its own identity."
+  }
+  assert {
+    condition     = azurerm_role_assignment.fabric_lake_reader[0].principal_id == "33333333-0000-0000-0000-000000000003" && azurerm_role_assignment.fabric_lake_reader[0].role_definition_name == "Storage Blob Data Reader"
+    error_message = "Fabric reads the lake through the workspace identity, read-only."
+  }
+  assert {
+    condition     = fabric_connection.lake[0].credential_details.credential_type == "WorkspaceIdentity"
+    error_message = "The lake connection uses the workspace identity, not a key or secret."
+  }
+  assert {
+    condition     = toset(keys(fabric_shortcut.gold)) == toset(["dim_date", "dim_neighbourhood", "fct_crime_incidents", "agg_crime_monthly_neighbourhood"])
+    error_message = "One shortcut per gold table, the same four Synapse exposes."
+  }
+  assert {
+    condition = alltrue([for k, sc in fabric_shortcut.gold :
+      sc.path == "Tables" && sc.target.adls_gen2.subpath == "/gold/${k}" && sc.target.adls_gen2.connection_id == "33333333-0000-0000-0000-000000000005"
+    ])
+    error_message = "Each shortcut lands under Tables and points at its gold folder through the lake connection."
+  }
+}
+
+run "fabric_requires_an_admin" {
+  command = plan
+  variables {
+    enable_fabric = true
+  }
+  expect_failures = [var.fabric_admin_upn]
 }

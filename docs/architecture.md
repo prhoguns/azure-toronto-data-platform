@@ -7,6 +7,8 @@ flowchart LR
     S -->|Databricks 02| G[(gold/<br/>Delta star schema)]
     G -->|OPENROWSET| SYN[Synapse serverless SQL<br/>gold.* views]
     SYN --> PBI[Power BI]
+    G -.->|OneLake shortcuts, optional| FAB[Fabric Lakehouse<br/>SQL endpoint, gold.* views]
+    FAB -.->|Direct Lake| PBI
     ADF[Data Factory<br/>pl_toronto_open_data<br/>daily 06:00 ET] -. orchestrates .-> B & S & G & SYN
     KV[Key Vault] -. secrets .-> ADF
 ```

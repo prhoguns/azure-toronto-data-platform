@@ -39,3 +39,31 @@ variable "tags" {
     managed = "terraform"
   }
 }
+
+variable "enable_fabric" {
+  description = "Add the Microsoft Fabric serving layer (fabric.tf). A Fabric capacity bills while it runs; pause it when idle."
+  type        = bool
+  default     = false
+}
+
+variable "fabric_sku" {
+  description = "Fabric capacity size. F2 is the smallest and is enough for this data volume."
+  type        = string
+  default     = "F2"
+
+  validation {
+    condition     = can(regex("^F(2|4|8|16|32|64|128|256|512|1024|2048)$", var.fabric_sku))
+    error_message = "fabric_sku must be an F SKU, for example F2."
+  }
+}
+
+variable "fabric_admin_upn" {
+  description = "User principal name (user@domain) of the Fabric capacity administrator. Required when enable_fabric is true."
+  type        = string
+  default     = null
+
+  validation {
+    condition     = !var.enable_fabric || var.fabric_admin_upn != null
+    error_message = "Set fabric_admin_upn when enable_fabric is true."
+  }
+}

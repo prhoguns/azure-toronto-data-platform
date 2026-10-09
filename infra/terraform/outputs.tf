@@ -26,3 +26,12 @@ output "synapse_serverless_endpoint" {
 output "key_vault_name" {
   value = azurerm_key_vault.this.name
 }
+
+output "fabric_workspace_id" {
+  value = var.enable_fabric ? fabric_workspace.this[0].id : null
+}
+
+output "fabric_lakehouse_sql_endpoint" {
+  description = "Connection string for the Lakehouse SQL analytics endpoint (run fabric/sql/ here)."
+  value       = var.enable_fabric ? fabric_lakehouse.gold[0].properties.sql_endpoint_properties.connection_string : null
+}
